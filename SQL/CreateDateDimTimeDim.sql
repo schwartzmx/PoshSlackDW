@@ -2,16 +2,17 @@
 
 USE [SlackDW]
 GO
+SET NOCOUNT ON;
 -----------------------------------------------------------------------
 --Make sure you set the Start and End Date below on row 58 and 59
 --Create the tables
 BEGIN TRY
- DROP TABLE [DimDate]
+ DROP TABLE stage.[Date]
 END TRY
 BEGIN CATCH
  --DO NOTHING
 END CATCH
-CREATE TABLE [dbo].[DimDate](
+CREATE TABLE [stage].[Date](
  --[DateSK] [int] IDENTITY(1,1) NOT NULL--Use this line if you just want an autoincrementing counter AND COMMENT BELOW LINE
  [DateSK] [int] NOT NULL--TO MAKE THE DateSK THE YYYYMMDD FORMAT USE THIS LINE AND COMMENT ABOVE LINE.
  , [Date] [datetime] NOT NULL
@@ -29,7 +30,7 @@ CREATE TABLE [dbo].[DimDate](
  , [Year] [char](4) NOT NULL
  , [StandardDate] [varchar](10) NULL
  , [HolidayText] [varchar](50) NULL
- CONSTRAINT [PK_DimDate] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Date] PRIMARY KEY CLUSTERED 
  (
  [DateSK] ASC
  )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
@@ -40,10 +41,10 @@ GO
 
 --Populate Date dimension
 
-TRUNCATE TABLE DimDate
+TRUNCATE TABLE stage.Date
 
 --IF YOU ARE USING THE YYYYMMDD format for the primary key then you need to comment out this line.
---DBCC CHECKIDENT (DimDate, RESEED, 60000) --In case you need to add earlier dates later.
+--DBCC CHECKIDENT (Date, RESEED, 60000) --In case you need to add earlier dates later.
 
 DECLARE @tmpDOW TABLE (DOW INT, Cntr INT)--Table for counting DOW occurance in a month
 INSERT INTO @tmpDOW(DOW, Cntr) VALUES(1,0)--Used in the loop below
@@ -83,7 +84,7 @@ WHILE @Date < @EndDate
  FROM @tmpDOW
  WHERE DOW = DATEPART(DW,@DATE) 
 
- INSERT INTO DimDate
+ INSERT INTO stage.Date
  (
  [DateSK],--TO MAKE THE DateSK THE YYYYMMDD FORMAT UNCOMMENT THIS LINE... Comment for autoincrementing.
  [Date]
@@ -144,7 +145,7 @@ WHILE @Date < @EndDate
 --Add HOLIDAYS --------------------------------------------------------------------------------------------------------------
 --THANKSGIVING --------------------------------------------------------------------------------------------------------------
 --Fourth THURSDAY in November.
-UPDATE DimDate
+UPDATE stage.Date
 SET HolidayText = 'Thanksgiving Day'
 WHERE [MONTH] = 11 
  AND [DAYOFWEEK] = 'Thursday' 
@@ -152,60 +153,60 @@ WHERE [MONTH] = 11
 GO
 
 --CHRISTMAS -------------------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Christmas Day'
 WHERE [MONTH] = 12 AND [DAY] = 25
 
 --4th of July ---------------------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Independance Day'
 WHERE [MONTH] = 7 AND [DAY] = 4
 
 -- New Years Day ---------------------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'New Year''s Day'
 WHERE [MONTH] = 1 AND [DAY] = 1
 
 --Memorial Day ----------------------------------------------------------------------------------------
 --Last Monday in May
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Memorial Day'
-FROM DimDate
+FROM stage.Date
 WHERE DateSK IN 
  (
  SELECT MAX([DateSK])
- FROM dbo.DimDate
+ FROM stage.Date
  WHERE [MonthName] = 'May'
  AND [DayOfWeek] = 'Monday'
  GROUP BY [YEAR], [MONTH]
  )
 --Labor Day -------------------------------------------------------------------------------------------
 --First Monday in September
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Labor Day'
-FROM DimDate
+FROM stage.Date
 WHERE DateSK IN 
  (
  SELECT MIN([DateSK])
- FROM dbo.DimDate
+ FROM stage.Date
  WHERE [MonthName] = 'September'
  AND [DayOfWeek] = 'Monday'
  GROUP BY [YEAR], [MONTH]
  )
 
 -- Valentine's Day ---------------------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Valentine''s Day'
 WHERE [MONTH] = 2 AND [DAY] = 14
 
 -- Saint Patrick's Day -----------------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Saint Patrick''s Day'
 WHERE [MONTH] = 3 AND [DAY] = 17
 GO
 --Martin Luthor King Day ---------------------------------------------------------------------------------------
 --Third Monday in January starting in 1983
-UPDATE DimDate
+UPDATE stage.Date
 SET HolidayText = 'Martin Luthor King Jr Day'
 WHERE [MONTH] = 1--January
  AND [Dayofweek] = 'Monday'
@@ -214,30 +215,30 @@ WHERE [MONTH] = 1--January
 GO
 --President's Day ---------------------------------------------------------------------------------------
 --Third Monday in February.
-UPDATE DimDate
-SET HolidayText = 'President''s Day'--select * from DimDate
+UPDATE stage.Date
+SET HolidayText = 'President''s Day'--select * from Date
 WHERE [MONTH] = 2--February
  AND [Dayofweek] = 'Monday'
  AND [DOWInMonth] = 3--Third occurance of a monday in this month.
 GO
 --Mother's Day ---------------------------------------------------------------------------------------
 --Second Sunday of May
-UPDATE DimDate
-SET HolidayText = 'Mother''s Day'--select * from DimDate
+UPDATE stage.Date
+SET HolidayText = 'Mother''s Day'--select * from Date
 WHERE [MONTH] = 5--May
  AND [Dayofweek] = 'Sunday'
  AND [DOWInMonth] = 2--Second occurance of a monday in this month.
 GO
 --Father's Day ---------------------------------------------------------------------------------------
 --Third Sunday of June
-UPDATE DimDate
-SET HolidayText = 'Father''s Day'--select * from DimDate
+UPDATE stage.Date
+SET HolidayText = 'Father''s Day'--select * from Date
 WHERE [MONTH] = 6--June
  AND [Dayofweek] = 'Sunday'
  AND [DOWInMonth] = 3--Third occurance of a monday in this month.
 GO
 --Halloween 10/31 ----------------------------------------------------------------------------------
-UPDATE dbo.DimDate
+UPDATE stage.Date
 SET HolidayText = 'Halloween'
 WHERE [MONTH] = 10 AND [DAY] = 31
 --Election Day--------------------------------------------------------------------------------------
@@ -253,7 +254,7 @@ CREATE TABLE #tmpHoliday(ID INT IDENTITY(1,1), DateID int, Week TINYINT, YEAR CH
 
 INSERT INTO #tmpHoliday(DateID, [YEAR],[DAY])
  SELECT [DateSK], [YEAR], [DAY]
- FROM dbo.DimDate
+ FROM stage.Date
  WHERE [MONTH] = 11
  AND [Dayofweek] = 'Monday'
  ORDER BY YEAR, DAY
@@ -293,7 +294,7 @@ WHILE @CURRENTYEAR <= @ENDYEAR
 
 UPDATE DT
 SET HolidayText = 'Election Day'
-FROM dbo.DimDate DT
+FROM stage.Date DT
 JOIN #tmpHoliday HL
  ON (HL.DateID + 1) = DT.DateSK
 WHERE [WEEK] = 1
@@ -302,68 +303,68 @@ DROP TABLE #tmpHoliday
 GO
 
 
---DimDate indexes---------------------------------------------------------------------------------------------
-CREATE UNIQUE NONCLUSTERED INDEX [IDX_DimDate_Date] ON [dbo].[DimDate] 
+--Date indexes---------------------------------------------------------------------------------------------
+CREATE UNIQUE NONCLUSTERED INDEX [IDX_Date_Date] ON [stage].[Date] 
 (
 [Date] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_Day] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_Day] ON [stage].[Date] 
 (
 [Day] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_DayOfWeek] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_DayOfWeek] ON [stage].[Date] 
 (
 [DayOfWeek] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_DOWInMonth] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_DOWInMonth] ON [stage].[Date] 
 (
 [DOWInMonth] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_DayOfYear] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_DayOfYear] ON [stage].[Date] 
 (
 [DayOfYear] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_WeekOfYear] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_WeekOfYear] ON [stage].[Date] 
 (
 [WeekOfYear] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_WeekOfMonth] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_WeekOfMonth] ON [stage].[Date] 
 (
 [WeekOfMonth] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_Month] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_Month] ON [stage].[Date] 
 (
 [Month] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_MonthName] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_MonthName] ON [stage].[Date] 
 (
 [MonthName] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_Quarter] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_Quarter] ON [stage].[Date] 
 (
 [Quarter] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_QuarterName] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_QuarterName] ON [stage].[Date] 
 (
 [QuarterName] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_Year] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_Year] ON [stage].[Date] 
 (
 [Year] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_dim_Time_HolidayText] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_dim_Time_HolidayText] ON [stage].[Date] 
 (
 [HolidayText] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
@@ -371,15 +372,15 @@ CREATE NONCLUSTERED INDEX [IDX_dim_Time_HolidayText] ON [dbo].[DimDate]
 PRINT convert(varchar,getdate(),113)--USED FOR CHECKING RUN TIME.
 
 
---This script will add Fiscal columns to the DimDate Table
+--This script will add Fiscal columns to the Date Table
 --This script will set the Start date and end below to the first and last date on your dim date table
 --The following Colums wil be created: Fiscal Year, FiscalQuarter, FiscalQuarterName, FiscalMonth
 
 --SET THE @DaysOffSet VARIABLE TO OFFSET THE DATE
-Alter Table DimDate Add FiscalMonth int
-Alter Table DimDate Add FiscalQuarter int
-Alter Table DimDate Add FiscalQuarterName Varchar(6)
-Alter Table DimDate Add FiscalYear char(10)
+Alter Table stage.Date Add FiscalMonth int
+Alter Table stage.Date Add FiscalQuarter int
+Alter Table stage.Date Add FiscalQuarterName Varchar(6)
+Alter Table stage.Date Add FiscalYear char(10)
 Go
 
 Declare @MonthOffSet int
@@ -399,8 +400,8 @@ DECLARE @StartDate datetime
 
 
 --Get first and last date 
-SELECT @StartDate = (Select Min([Date]) from [DimDate])
-Select @EndDate = (Select Max([Date]) from [DimDate])
+SELECT @StartDate = (Select Min([Date]) from stage.[Date])
+Select @EndDate = (Select Max([Date]) from stage.[Date])
 SELECT @Date = @StartDate
 
 --set the first date of the fiscal year
@@ -444,7 +445,7 @@ WHILE @Date <= @EndDate
  End
 
 --Update the table with the fical numbers
-Update DimDate
+UPDATE stage.Date
  Set 
  FiscalMonth = @MonthNumber,
  FiscalQuarter = @QuarterNumber,
@@ -458,29 +459,29 @@ Update DimDate
 
 PRINT CONVERT(VARCHAR,GETDATE(),113)--USED FOR CHECKING RUN TIME.
 
---DimDate indexes---------------------------------------------------------------------------------------------
+--Date indexes---------------------------------------------------------------------------------------------
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_FiscalMonth] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_FiscalMonth] ON [stage].[Date] 
 (
 [FiscalMonth] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_FiscalMonthName] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_FiscalMonthName] ON [stage].[Date] 
 (
 [MonthName] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_FiscalQuarter] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_FiscalQuarter] ON [stage].[Date] 
 (
 [FiscalQuarter] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_FiscalQuarterName] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_FiscalQuarterName] ON [stage].[Date] 
 (
 [FiscalQuarterName] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimDate_FiscalYear] ON [dbo].[DimDate] 
+CREATE NONCLUSTERED INDEX [IDX_Date_FiscalYear] ON [stage].[Date] 
 (
 [FiscalYear] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
@@ -494,17 +495,17 @@ PRINT convert(varchar,getdate(),113)--USED FOR CHECKING RUN TIME.
 
 
 
---Create DimTime Script
+--Create Time Script
 
 SET ANSI_PADDING OFF
 BEGIN TRY
- DROP TABLE [DimTime]
+ DROP TABLE stage.[Time]
 END TRY
 BEGIN CATCH
  --DO NOTHING
 END CATCH
 
-CREATE TABLE [dbo].[DimTime](
+CREATE TABLE [stage].[Time](
  [TimeSK] [int] IDENTITY(1,1) NOT NULL,
  [Time] [char](8) NOT NULL,
  [Hour] [char](2) NOT NULL,
@@ -513,7 +514,7 @@ CREATE TABLE [dbo].[DimTime](
  [Second] [char](2) NOT NULL,
  [AmPm] [char](2) NOT NULL,
  [StandardTime] [char](11) NULL,
- CONSTRAINT [PK_DimTime] PRIMARY KEY CLUSTERED 
+ CONSTRAINT [PK_Time] PRIMARY KEY CLUSTERED 
  (
  [TimeSK] ASC
  )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
@@ -529,11 +530,15 @@ DECLARE @Time DATETIME
 
 SET @TIME = CONVERT(VARCHAR,'12:00:00 AM',108)
 
-TRUNCATE TABLE DimTime
+BEGIN TRY 
+	TRUNCATE TABLE stage.Time
+END TRY
+BEGIN CATCH
+END CATCH
 
 WHILE @TIME <= '11:59:59 PM'
  BEGIN
- INSERT INTO dbo.DimTime([Time], [Hour], [MilitaryHour], [Minute], [Second], [AmPm])
+ INSERT INTO stage.Time([Time], [Hour], [MilitaryHour], [Minute], [Second], [AmPm])
  SELECT CONVERT(VARCHAR,@TIME,108) [Time]
  , CASE 
  WHEN DATEPART(HOUR,@Time) > 12 THEN DATEPART(HOUR,@Time) - 12
@@ -550,64 +555,64 @@ WHILE @TIME <= '11:59:59 PM'
  SELECT @TIME = DATEADD(second,1,@Time)
  END
 
-UPDATE DimTime
+UPDATE stage.Time
 SET [HOUR] = '0' + [HOUR]
 WHERE LEN([HOUR]) = 1
 
-UPDATE DimTime
+UPDATE stage.Time
 SET [MINUTE] = '0' + [MINUTE]
 WHERE LEN([MINUTE]) = 1
 
-UPDATE DimTime
+UPDATE stage.Time
 SET [SECOND] = '0' + [SECOND]
 WHERE LEN([SECOND]) = 1
 
-UPDATE DimTime
+UPDATE stage.Time
 SET [MilitaryHour] = '0' + [MilitaryHour]
 WHERE LEN([MilitaryHour]) = 1
 
-UPDATE DimTime
+UPDATE stage.Time
 SET StandardTime = [Hour] + ':' + [Minute] + ':' + [Second] + ' ' + AmPm
 WHERE StandardTime is null
 AND HOUR <> '00'
 
-UPDATE DimTime
+UPDATE stage.Time
 SET StandardTime = '12' + ':' + [Minute] + ':' + [Second] + ' ' + AmPm
 WHERE [HOUR] = '00'
 
 
---DimTime indexes
-CREATE UNIQUE NONCLUSTERED INDEX [IDX_DimTime_Time] ON [dbo].[DimTime] 
+--Time indexes
+CREATE UNIQUE NONCLUSTERED INDEX [IDX_Time_Time] ON [stage].[Time] 
 (
 [Time] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_Hour] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_Hour] ON [stage].[Time] 
 (
 [Hour] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_MilitaryHour] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_MilitaryHour] ON [stage].[Time] 
 (
 [MilitaryHour] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_Minute] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_Minute] ON [stage].[Time] 
 (
 [Minute] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_Second] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_Second] ON [stage].[Time] 
 (
 [Second] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_AmPm] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_AmPm] ON [stage].[Time] 
 (
 [AmPm] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
 
-CREATE NONCLUSTERED INDEX [IDX_DimTime_StandardTime] ON [dbo].[DimTime] 
+CREATE NONCLUSTERED INDEX [IDX_Time_StandardTime] ON [stage].[Time] 
 (
 [StandardTime] ASC
 )WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]

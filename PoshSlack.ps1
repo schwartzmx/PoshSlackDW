@@ -1,3 +1,43 @@
+<#
+.SYNOPSIS 
+Script to load historical data from Slack into a somewhat star-schema like DW for viewing in PowerBI
+
+.DESCRIPTION
+By default this will incrementally process new messages using a ProcessLog table that logs the Epoch timestamp of messages from Slack.
+Note this does have the potential to miss reactions if this is running regularly, as reactions can be added after the fact with no known timestamp.
+
+.PARAMETER SlackToken
+Slack API Token
+
+.PARAMETER SQLHost
+Destination SQLServer host, i.e. 10.1.1.2 or a SQLServer name if name resolution is available
+
+.PARAMETER DBUser
+DB user name
+
+.PARAMETER DBPass
+DB password
+
+.PARAMETER Reprocess
+WARNING: This will force a complete reprocess of all messages, reactions, channels, etc.. completely wiping out the entirety of the database.
+
+.PARAMETER InitDB
+Initialize the database destination, for loading Slack data
+
+.LINK
+https://github.com/schwartzmx/PoshSlackDW
+
+.EXAMPLE   
+PoshSlack.ps1 -InitDB -SlackToken 'XXXXXXXXXXXXXXXX' -SQLHost 10.1.2.3
+
+Initializes the database and continues to do a full historical load of all slack data.
+
+.EXAMPLE
+PoshSlack.ps1 -SlackToken 'XXXXXXXXXXXXXXXX' -SQLHost 10.1.2.3
+
+Continues where it left off, doing an incremental load from the latest Epoch timestamp stored in the Epoch log table.
+
+#>
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
@@ -6,9 +46,13 @@ param(
     [ValidateNotNullOrEmpty()]
     [String]$SQLHost=$(throw "SQLHost is mandatory, please provide a value. (ex. 10.1.12.3)")
     ,[Parameter()]
-    [String]$SQLDatabase="SlackDW"
+    [String]$DBUser
+    ,[Parameter()]
+    [String]$DBPass
     ,[Parameter()]
     [Switch]$Reprocess
+    ,[Parameter()]
+    [Switch]$InitDB
 )
 
 # Import our trusty SQLPS module
@@ -40,8 +84,7 @@ Function Get-UserList {
         return $json.members
     }
     Else {
-        Throw "An error occured when retrieving the Slack members."
-        Exit 1
+        Write-Error "An error occured when retrieving the Slack members.  The error from Slack is: $($json.error)"
     }
 }
 
@@ -53,8 +96,7 @@ Function Get-ChannelList {
         return $json.channels
     }
     Else {
-        Throw "An error occured when retrieving the Slack channels."
-        Exit 1
+        Write-Error "An error occured when retrieving the Slack channels.  The error from Slack is: $($json.error)"
     }
 }
 
@@ -66,8 +108,7 @@ Function Get-UserGroups {
         return $json.usergroups
     }
     Else {
-        Throw "An error occured when retrieving the Slack user groups."
-        Exit 1
+        Write-Error "An error occured when retrieving the Slack user groups.  The error from Slack is: $($json.error)"
     }
 }
 
@@ -84,9 +125,7 @@ Function Get-MessagesByChannel-Search {
         return $json
     }
     Else {
-        Write-Error  "An error occured when retrieving the Slack search for $Search in $ChannelName."
-        Throw "An error occured when retrieving the Slack search for $Search in $ChannelName."
-        Exit 1
+        Write-Error  "An error occured when retrieving the Slack search for $Search in $ChannelName.  The error from Slack is: $($json.error)"
     }
 }
 
@@ -103,9 +142,7 @@ Function Get-MessagesByChannel-Incremental {
         return $json
     }
     Else {
-        Write-Error "An error occured when retrieving the Slack channel $channelID messages."
-        Throw "An error occured when retrieving the Slack channel $channelID messages."
-        Exit 1
+        Write-Error "An error occured when retrieving the Slack channel $channelID messages.  The error from Slack is: $($json.error)"
     }
 }
 
@@ -122,8 +159,7 @@ Function Get-StarsByUser {
         return $json
     }
     Else {
-        Throw "An error occured when retrieving the Slack stars by User: $user, and Page: $page.."
-        Exit 1
+        Write-Error "An error occured when retrieving the Slack stars by User: $user, and Page #: $page..  The error from Slack is: $($json.error)"
     }
 
 }
@@ -133,7 +169,7 @@ Function Get-StarsByUser {
 Function Load-UserList {
     Write-Host "Loading user list..." -NoNewLine -ForegroundColor "Yellow"
     $merge = "
-        MERGE dbo.Member t
+        MERGE stage.Member t
         USING (
             SELECT
                 '{0}' as [Name],
@@ -182,7 +218,7 @@ Function Load-UserList {
 Function Load-ChannelList {
     Write-Host "Loading channel list..." -NoNewLine -ForegroundColor "Yellow"
     $ChannelMerge = "
-        MERGE dbo.Channel t
+        MERGE stage.Channel t
         USING (
             SELECT
                 '{0}' as [Name],
@@ -219,10 +255,10 @@ Function Load-ChannelList {
         ;
     "
     $ChannelMemberInsert = "
-        INSERT INTO [dbo].[ChannelMember] (MemberID, ChannelID)
+        INSERT INTO [stage].[ChannelMember] (MemberID, ChannelID)
         VALUES ('{0}', '{1}');
     "
-    Truncate-Table '[dbo].[ChannelMember]';
+    Truncate-Table '[stage].[ChannelMember]';
 
     $channels = Get-ChannelList
 
@@ -246,26 +282,26 @@ Function Load-ChannelList {
 
 Function Load-UserGroups {
     Write-Host "Loading user groups..." -NoNewLine -ForegroundColor "Yellow"
-    Truncate-Table '[dbo].[UserGroup]';
-    Truncate-Table  '[dbo].[MemberUserGroup]';
-    Truncate-Table '[dbo].[ChannelUserGroup]';
+    Truncate-Table '[stage].[UserGroup]';
+    Truncate-Table  '[stage].[MemberUserGroup]';
+    Truncate-Table '[stage].[ChannelUserGroup]';
 
     $insertGroup = "
-        INSERT INTO [dbo].[UserGroup] (ID, Name, Description, Handle)
+        INSERT INTO [stage].[UserGroup] (ID, Name, Description, Handle)
         VALUES ('{0}', '{1}', '{2}', '{3}')
     "
     $insertMemUserGroup = "
-        INSERT INTO [dbo].[MemberUserGroup] (MemberID, UserGroupID)
+        INSERT INTO [stage].[MemberUserGroup] (MemberID, UserGroupID)
         VALUES ('{0}', '{1}')
     "
     $insertChannelUserGroup = "
-        INSERT INTO [dbo].[ChannelUserGroup] (ChannelID, UserGroupID)
+        INSERT INTO [stage].[ChannelUserGroup] (ChannelID, UserGroupID)
         VALUES ('{0}', '{1}')
     "
     $groups = Get-UserGroups
     ForEach ($group in $groups) {
         $groupID = $group.id
-        $insert = $insertGroup -f $groupID, $group.name, $group.description, $group.handle
+        $insert = $insertGroup -f $groupID, $(Sanitize-String $group.name), $(Sanitize-String $group.description), $group.handle
         Exec-SQL -Query $insert
 
         ForEach ($channel in $group.prefs.channels) {
@@ -289,9 +325,9 @@ Function Load-Messages-Reactions {
     [String]$ProcessStartLatest = (New-TimeSpan -Start $(Get-Date -Date "01/01/1970") -End $(Get-Date)).TotalSeconds
 
     If ($Full) {
-        Truncate-Table 'dbo.FactMessage';
-        Truncate-Table 'dbo.FactReaction';
-        Truncate-Table 'dbo.ProcessMessageLog';
+        Truncate-Table 'stage.FactMessage';
+        Truncate-Table 'stage.FactReaction';
+        Truncate-Table 'stage.ProcessMessageLog';
         # For full use 0 as the furthest in history we want to go
         [String]$ProcessStartOldest = '0'
     }
@@ -304,7 +340,7 @@ Function Load-Messages-Reactions {
     $ChannelList = Channel-List
 
     $MergeMessage = "
-        MERGE dbo.FactMessage t
+        MERGE stage.FactMessage t
         USING (
             SELECT
                 '{0}' as EpochTimeStamp,
@@ -327,7 +363,7 @@ Function Load-Messages-Reactions {
     "
 
     $MergeReaction = "
-        MERGE dbo.FactReaction t
+        MERGE stage.FactReaction t
         USING (
             SELECT
                 '{0}' as MessageRID,
@@ -396,7 +432,7 @@ Function Load-Messages-Reactions {
         }
     }
 
-    $insertLatest = "INSERT INTO dbo.ProcessMessageLog (EpochTimeStamp) VALUES ('$ProcessStartLatest');"
+    $insertLatest = "INSERT INTO stage.ProcessMessageLog (EpochTimeStamp) VALUES ('$ProcessStartLatest');"
     Exec-SQL -Query $insertLatest
 
 }
@@ -404,20 +440,20 @@ Function Load-Messages-Reactions {
 
 
 Function Load-Stars-ByUser {
-    Truncate-Table 'dbo.FactStar';
+    Truncate-Table 'stage.FactStar';
     $members = Member-List
 
     Write-Host "Loading user starred items..." -ForegroundColor "Yellow" -NoNewLine
 
     $InsertStarredMessage = "
-        INSERT INTO [dbo].FactStar (MemberID, StarType, ChannelID, EpochTimeStamp, MessageMemberID)
+        INSERT INTO [stage].FactStar (MemberID, StarType, ChannelID, EpochTimeStamp, MessageMemberID)
         VALUES ('{0}', '{1}', '{2}', '{3}', '{4}');
     "
     $InsertStarredChannel = "
-        INSERT INTO [dbo].FactStar (MemberID, StarType, ChannelID)
+        INSERT INTO [stage].FactStar (MemberID, StarType, ChannelID)
         VALUES ('{0}', '{1}', '{2}');
     "
-
+    $json = $null
     ForEach ($memberID in $members) {
         $currentPage = 1
         do {
@@ -441,18 +477,30 @@ Function Load-Stars-ByUser {
             $currentPage += 1
             $maxPage = $json.paging.pages
         } while ($currentPage -lt $maxPage)
-
+	If ($json -eq $null) { 
+	    Break;
+        } # This 99% of the time means permission issue
     }
 
-    Write-Host " Complete" -ForegroundColor "Green"
+    If ($json -eq $null) { 
+        Write-Host "WARNING: Skipping User stars because of permission issue." -ForegroundColor Yellow
+    } 
+    Else {
+        Write-Host " Complete" -ForegroundColor "Green"
+    }
 }
 
 
 ################## Helper Functions ###########################
 Function Exec-SQL {
-    param([String]$Query)
+    param([String]$Query,[String]$Database="SlackDW")
     # Very important to use DisableVariables incase of $ in strings
-    Invoke-SQLCmd -Server "$SQLHost" -Database $Database -Query $Query -DisableVariables -ErrorAction Stop
+    If ($DBUser -and $DBPass){
+        Invoke-SQLCmd -Username $DBUser -Password $DBPass -Server "$SQLHost" -Database $Database -Query $Query -QueryTimeout 500 -DisableVariables -ErrorAction Stop
+    }
+    Else {
+        Invoke-SQLCmd -Server "$SQLHost" -Database $Database -Query $Query -DisableVariables -QueryTimeout 500 -ErrorAction Stop
+    }
 }
 
 Function Truncate-Table {
@@ -465,17 +513,17 @@ Function Truncate-Table {
 }
 
 Function Channel-List {
-    $c = "SELECT DISTINCT ID FROM dbo.Channel WHERE ID <> '$UnknownValue';"
+    $c = "SELECT DISTINCT ID FROM stage.Channel WHERE ID <> '$UnknownValue';"
     return $(Exec-SQL -Query $c).ID
 }
 
 Function Member-List {
-    $m = "SELECT DISTINCT ID FROM [dbo].[Member] WHERE ID <> '$UnknownValue';"
+    $m = "SELECT DISTINCT ID FROM [stage].[Member] WHERE ID <> '$UnknownValue';"
     return $(Exec-SQL -Query $m).ID
 }
 
 Function Get-MaxProcessDate {
-    $getDate = "SELECT TOP 1 EpochTimeStamp as [MaxDate] FROM dbo.ProcessMessageLog ORDER BY RID DESC;"
+    $getDate = "SELECT TOP 1 EpochTimeStamp as [MaxDate] FROM stage.ProcessMessageLog ORDER BY RID DESC;"
     return  $(Exec-SQL -Query $getDate).MaxDate
 }
 
@@ -485,8 +533,42 @@ Function Sanitize-String {
 }
 
 
+############ Init Database ###########
+Function Initialize-DB {
+    $SQLdir = Join-Path -Path $(Split-Path $SCRIPT:MyInvocation.MyCommand.Path -parent) -ChildPath '\SQL\'
+    $DateTime = Get-Content $(Join-Path -Path $SQLdir -ChildPath 'CreateDateDimTimeDim.sql') -Raw
+    $CreateDB = Get-Content $(Join-Path -Path $SQLdir -ChildPath 'CreateDB.sql') -Raw
+    $CreateTables = Get-Content $(Join-Path -Path $SQLdir -ChildPath 'CreateTables.sql') -Raw
+
+    Write-Host "Creating database... " -NoNewline -ForegroundColor "Yellow"
+    Exec-SQL -Query $CreateDB -Database 'master'
+    Write-Host "Complete" -ForegroundColor "Green"
+
+    Write-Host "Creating date and time dimensions... " -NoNewline -ForegroundColor "Yellow"
+    Exec-SQL -Query $DateTime -Database 'SlackDW'
+    Write-Host "Complete" -ForegroundColor "Green"
+
+    Write-Host "Creating tables... " -NoNewline -ForegroundColor "Yellow"
+    Exec-SQL -Query $CreateTables -Database 'SlackDW'
+    Write-Host "Complete" -ForegroundColor "Green"
+
+}
+
+Function Check-DatabaseExistence {
+    return $((Exec-SQL -Query "select 1 as status from sys.databases where name = 'SlackDW'" -Database 'master').status)
+}
+
 ################# MAIN ###############
 Function Main {
+    If(($DBUser -and !($DBPass)) -or ($DBPass -and !($DBPass))) {
+        throw "Please provide both DBPass and DBUser!  Only one was found."
+    }
+    If(!($InitDB) -and (Check-DatabaseExistence) -ne 1) {
+        throw "The database SlackDW does not exist.  Run using -InitDB flag to create the DB."
+    }
+    If($InitDB) {
+        Initialize-DB
+    }
     Load-UserList
     Load-ChannelList
     Load-UserGroups
